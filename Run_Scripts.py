@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[8]:
+# In[6]:
 
 
 import requests, json
@@ -132,6 +132,12 @@ def addminutesutc(utctime,mins):
 
 
 
+
+def idstr(idinput):
+    return(str(idinput).lower().replace(" ", "_").replace("/", "_").replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss"))
+
+
+
 #------------------------------------------------------------------------------------
 #function that builds the metadata
 
@@ -186,16 +192,16 @@ def generatemetadata():
 
     #metadata
     totalstarttime = time.time() #to check how long the upload took
-
-    #observed property
-    generatepropertyid= "saqn:o:" + str(feature).lower().replace(" ", "_")
+    
+    #observed property --> should already be "officially" created!
+    generatepropertyid= "saqn:op:" + str(feature).lower().replace(" ", "_")
 
 
     obsproperty = {
         "name": str(feature),
-        "description": "",
+        "description": str(feature),
         "definition": "",
-        "@iot.id": str(generatepropertyid).lower().replace(" ", "_")
+        "@iot.id": idstr(generatepropertyid)
         }
     if upload==True:
         requests.post(url + '/ObservedProperties', json.dumps(obsproperty))
@@ -217,13 +223,13 @@ def generatemetadata():
     #building things
 
     #Location ID
-    generatelocid = "geo:" + str(float(file["station_longitude_d"][thingnr])) + "," + str(float(file["station_latitude_d"][thingnr])) + "," + str(float(file["station_altitude"][thingnr]))
+    generatelocid = "geo:" + str(float(file["station_latitude_d"][thingnr])) + "," + str(float(file["station_longitude_d"][thingnr])) + "," + str(float(file["station_altitude"][thingnr]))
 
     #Thing ID
     generatethingid="saqn:t" #generates the id for the thing by adding each of the following features to define it uniquely
     generatethingid+=":" + str(repnetcodebyurl(file["network_code"][thingnr])) #adds the url through the network code
-    generatethingid+=":" + str(file["station_name"][thingnr])
-    generatethingid+=":" + "comm" + str(file["station_start_date"][thingnr])[0:6]
+    generatethingid+=":" + "station_" + str(file["station_name"][thingnr])
+    generatethingid+=":" + str(file["station_start_date"][thingnr])[0:4] + "-" + str(file["station_start_date"][thingnr])[4:6]
     generatethingid+=":" + str(file["station_code"][thingnr])
 #    generatethingid+=":" + str(currentyear) #adds the current year to make the identifier unique in case the id gets changed one day
 #    for label in ["station_name","station_start_date","station_code"]: #add more info if desired
@@ -238,18 +244,18 @@ def generatemetadata():
             rawproperties[eachproperty] = file[eachproperty][thingnr]
 
     #generate the thing JSON
-    thingdata = {"name": "Measuring Station " + str(thingcode),
+    thingdata = {"name": "Measuring Station " + str(file["station_name"][thingnr]),
         "description": "A station measuring" + str(generatedescr),
         "properties": rawproperties,
-        "@iot.id": str(generatethingid).lower().replace(" ", "_").replace("/", "_"),
+        "@iot.id": idstr(generatethingid),
          "Locations": [{
-            "name": "Location of " + "measuring Station " + str(thingcode),
+            "name": "Location at latitude " + str(float(file["station_latitude_d"][thingnr])) + " and longitude " + str(float(file["station_longitude_d"][thingnr])),
             "description": "located at " + str(file["station_name"][thingnr]),
             "encodingType": "application/vnd.geo+json",
-            "@iot.id": str(generatelocid),
+            "@iot.id": idstr(generatelocid),
             "location": {
                   "type": "Point",
-                  "coordinates": [float(file["station_latitude_d"][thingnr]), float(file["station_longitude_d"][thingnr]), float(file["station_altitude"][thingnr])]
+                  "coordinates": [float(file["station_longitude_d"][thingnr]), float(file["station_latitude_d"][thingnr]), float(file["station_altitude"][thingnr])]
             }
 
           }]
@@ -275,8 +281,16 @@ def generatemetadata():
                     #------------------------------------------------------------------------------------------------
                     #building the sensors
                     #generates a dictionary of all raw properties of the thing to dump into metadata property
+                    uploadmetadata = {}             
+                    uploadmetadata["script version number"]="00000"
+                    uploadmetadata["uploaded data from"]=configuration["starttime"]
+                    uploadmetadata["uploaded data until"]=configuration["endtime"]
+                    
                     rawmetadata = {}
                     rawmetadata["station_code"]=thingcode
+                    rawmetadata["upload properties"]=uploadmetadata
+                    
+                    
                     for eachdata in list(df_stationparameters): #option 1: all metadata
                     #for eachdata in ["type_of_parameter","parameter","component_code","measurement_technique_principle"]: #option 2: pick
                         if str(list(df_stationparameters[eachdata][thingcode])[sensnr]) == 'nan':
@@ -289,7 +303,7 @@ def generatemetadata():
 
                     generatesensorid="saqn:s" #generates the id for the sensor by adding each of the following features to define it uniquely
                     generatesensorid+=":" + str(repnetcodebyurl(file["network_code"][thingnr])) #adds the url through the network code
-                    generatesensorid+=":" + "unknown_type_" + str(list(df_stationparameters["measurement_technique_principle"][thingcode])[sensnr]) + "_sensor"
+                    generatesensorid+=":" + "generic_" + str(list(df_stationparameters["measurement_technique_principle"][thingcode])[sensnr]) + "_sensor"
 
 
         #                for label in ["parameter","measurement_technique_principle"]: #add more info if desired
@@ -302,7 +316,7 @@ def generatemetadata():
                             "description": "A sensor measuring " + str(feature) + " using " + str(mestech),
                             "encodingType": "application/json",
                             "metadata": "",
-                            "@iot.id": str(generatesensorid).lower().replace(" ", "_")
+                            "@iot.id": idstr(generatesensorid)
                             }
                     if upload==True:
                         requests.post(url + '/Sensors', json.dumps(sensor, cls=MyEncoder))
@@ -312,14 +326,14 @@ def generatemetadata():
                     #------------------------------------------------------------------------------------------------
                     #building the datastreams
 
-                    generatestreamid = "saqn:d"
+                    generatestreamid = "saqn:ds"
                     generatestreamid+=":" + str(repnetcodebyurl(file["network_code"][thingnr]))
-                    generatestreamid+=":" + "unknown_type_" + str(list(df_stationparameters["measurement_technique_principle"][thingcode])[sensnr]) + "_sensor"
-                    generatestreamid+=":" + "comm" + str(list(df_stationparameters["measurement_start_date"][thingcode])[sensnr])[0:6]
+                    generatestreamid+=":" + "generic_" + str(list(df_stationparameters["measurement_technique_principle"][thingcode])[sensnr]) + "_sensor"
+#                    generatestreamid+=":" + str(list(df_stationparameters["measurement_start_date"][thingcode])[sensnr])[0:4] + "-" + str(list(df_stationparameters["measurement_start_date"][thingcode])[sensnr])[4:6]
                     generatestreamid+=":" + str(thingcode)
                     generatestreamid+=":" + str(feature)
 
-                    print("Building Datastream " + str(generatestreamid).lower().replace(" ", "_"))
+                    print("Building Datastream " + idstr(generatestreamid))
 
                     datastream = {"name": str(thissensor) + " Datastream of station " + str(thingcode),
                                 "description": "A Datastream measuring " + str(thissensor) + " using " + str(mestech),
@@ -330,10 +344,10 @@ def generatemetadata():
                                     "definition": "none"
                                     },
                                 "properties": rawmetadata,
-                                "@iot.id": str(generatestreamid).lower().replace(" ", "_"),
-                                "Thing":{"@iot.id":str(generatethingid).lower().replace(" ", "_").replace("/", "_")},
-                                "Sensor":{"@iot.id":str(generatesensorid).lower().replace(" ", "_")},
-                                "ObservedProperty":{"@iot.id":str(generatepropertyid).lower().replace(" ", "_")}
+                                "@iot.id": idstr(generatestreamid),
+                                "Thing":{"@iot.id":idstr(generatethingid)},
+                                "Sensor":{"@iot.id":idstr(generatesensorid)},
+                                "ObservedProperty":{"@iot.id":idstr(generatepropertyid)}
                                 }
 
                     if upload==True:
@@ -418,7 +432,7 @@ def generatemetadata():
                             datalist.append([toutcformat(datetime.utcfromtimestamp(begintimeunix + (scopesec*i))),toutcformat(datetime.utcfromtimestamp(begintimeunix + ((scopesec*i) + (scopesec-60)) )),datavalue[i][0]])
 
                     dataframe = pd.DataFrame.from_records(datalist, columns=labels)
-                    dataframemeta = pd.DataFrame.from_records([[generatestreamid.lower().replace(" ", "_")]], columns=['datastreamID'])
+                    dataframemeta = pd.DataFrame.from_records([[idstr(generatestreamid)]], columns=['datastreamID'])
 
                     #save dataframe to excel sheet
                     filename= str(thingcode) + "_" + str(thissensor) + "_" + str(toutcformat(begintime)[0:10]) + "_" + str(toutcformat(endtime)[0:10]) + ".xlsx"
@@ -534,13 +548,13 @@ def parseexcel():
     for i in range(len(list(datafile["interval_start_time"]))): #eleganter ist hier feature zu nehmen aber ist egal
         #phenotime = toutcformat(datetime.utcfromtimestamp(tounixtime(begin)+scopesec*i))
 
-        generateobsid="saqn:obs:" + str(datastreamID)[7:] + ":" + str(datafile["interval_start_time"][i]) + "/" + str(intervalllength)
+        generateobsid="saqn:o:" + str(datastreamID)[8:] + ":" + str(datafile["interval_start_time"][i]) + "/" + str(intervalllength)
 
         observation = {
         "phenomenonTime" : str(datafile["interval_start_time"][i]) + "/" + str(intervalllength), 
         "result" : float(datafile[str(feature)][i]),
         "Datastream":{"@iot.id": str(datastreamID)},
-        "@iot.id": str(generateobsid).lower().replace(" ", "_").replace("/", "_")
+        "@iot.id": idstr(generateobsid)
         }
 
         requests.post(url + '/Observations', json.dumps(observation))
@@ -644,6 +658,27 @@ for station in parselist:
 
 
 print("Done")
+
+
+# In[2]:
+
+
+#requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Things")
+#requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Sensors")
+#requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Locations")
+#requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/ObservedProperties")
+#requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/FeaturesOfInterest")
+#requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Datastreams")
+#requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Observations")
+
+
+# In[7]:
+
+
+#requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Things('saqn%3At%3Alfu.bayern.de%3Astation_augsburg_karlstrasse%3A2003-08%3Adeby110')")
+
+
+# In[ ]:
 
 
 
