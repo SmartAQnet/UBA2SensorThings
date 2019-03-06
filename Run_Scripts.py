@@ -1,43 +1,44 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[6]:
+# # 1. Initialisations
+# ## 1.1. Import Libraries
+
+# In[ ]:
 
 
 import requests, json
 import pandas as pd
 from pandas import ExcelWriter
-from pandas import ExcelFile
 import sys
 import time
-import requests, json
 import numpy as np
 import calendar
 from datetime import datetime
 import random
 import glob
+import hashlib
 
 
-#converts numpy types to python types, otherwise json conversion produces an error. call json.dumps(***, cls=MyEncoder)
-class MyEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        else:
-            return super(MyEncoder, self).default(obj)
+# ## 1.2. Read Metadata Files
+
+# In[ ]:
 
 
-
+destinationurl = "http://smartaqnet-dev.teco.edu/v1.0"
 
 file = pd.read_excel('metadata/Bericht_EU_Meta_Stationen.xlsx')
 filemeta=pd.read_excel('metadata/Bericht_EU_Meta_Stationsparameter.xlsx')
 df_stationparameters = filemeta.set_index("station_code")
 
-#federal state, network code, website
+#list of features with their component codes as appears in 'metadata/Bericht_EU_Meta_Stationsparameter.xlsx'
+listofreplacements=[
+    ('PM10','5.0','pm10'),
+    ('PM2,5','6001.0','pm2p5'),
+    ('PM1','6002.0','pm1'),
+]
+
+#federal state, network code (as appears in 'metadata/Bericht_EU_Meta_Stationen.xlsx'), operator-url
 ccodesetreadable=[('Hessen', 'DE009A','hlnug.de'),
  ('Saarland', 'DE001A','saarland.de'),
  ('Berlin', 'DE008A','berlin.de'),
@@ -56,8 +57,6 @@ ccodesetreadable=[('Hessen', 'DE009A','hlnug.de'),
  ('Sachsen-Anhalt', 'DE015A','luesa.sachsen-anhalt.de'),
  ('Niedersachsen', 'DE010A','umwelt.niedersachsen.de')]
 
-        
-        
 
 #returns the url for the network code
 def repnetcodebyurl(netcode):
@@ -70,6 +69,40 @@ def repnetcodebystate(netcode):
     for item in ccodesetreadable:
         if item[1]==netcode:
             return(item[0])
+
+
+# ## 1.3. General Function Definitions
+
+# In[ ]:
+
+
+#converts numpy types to python types, otherwise json conversion produces an error. call json.dumps(***, cls=MyEncoder)
+class MyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return super(MyEncoder, self).default(obj)
+
+        
+
+# returns strings in the conventional format for iot.ids
+def idstr(idinput):
+    return(str(idinput).lower().replace(" ", "_").replace("/", "_").replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss"))
+
+
+# returns the first 7 digits of the sha1 hash of the input string
+def hashfunc(inputstring, printme):
+    returnhash= hashlib.sha1(bytes(str(inputstring), 'utf-8')).hexdigest()[0:7]
+    if printme == True:
+        print("Converting '" + str(inputstring) + "' to hash '" + str(returnhash) +"'")
+    return(returnhash)
+
+
 
 #------------------------------------------------------------------------------------
 #functions for time conversion
@@ -126,15 +159,18 @@ def toutcformat(datetime_input):
     utctime=year + '-' + month + '-' + day + 'T' + hour + ':' + minute + ':' + second + '.' + millisecond + 'Z'
     return utctime
 
+
 def addminutesutc(utctime,mins):
     return(toutcformat(datetime.utcfromtimestamp(tounixtime(todatetimeformat(utctime))+(mins*60))))
 
 
+# # 2. Function generatemetadata() 
+# ## - models the Database from the Metadata Files
+# ## - gets the Observations from UBA url and saves them into an excel file
+# ## - If upload set to true will execute parseexcel() to upload the Observations
 
+# In[ ]:
 
-
-def idstr(idinput):
-    return(str(idinput).lower().replace(" ", "_").replace("/", "_").replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss"))
 
 
 
@@ -166,47 +202,39 @@ def generatemetadata():
     print("Upload is set to " + str(upload))
     print("Extracting Observations for ObservedProperty " + str(feature))
 
-    #list of features with their component codes as appears in 'metadata/Bericht_EU_Meta_Stationsparameter.xlsx'
-    listofreplacements=[
-        ('PM10','5.0'),
-        ('PM2,5','6001.0'),
-        ('PM1','6002.0'),
-    ]
-
-    #fetches the code for the above defined 'feature'
+    #fetches the code for the 'feature' defined in listofreplacements
     for eachelement in listofreplacements:
         if eachelement[0] == feature:
             code = eachelement[1]
+            op_id_variable = eachelement[2]
 
     
     
     
-    #crosscheck
+    #print for human crosscheck
     print('Check: Going to uploading data for station ' + str(thingcode) + ' at ' + str(file.set_index("station_code")["station_name"][thingcode]))
-
-
-
-#    currentyear=str(datetime.utcnow())[0:4]
-
-
 
     #metadata
     totalstarttime = time.time() #to check how long the upload took
     
     #observed property --> should already be "officially" created!
-    generatepropertyid= "saqn:op:" + str(feature).lower().replace(" ", "_")
+    op_tohash = idstr(op_id_variable)
+    generatepropertyid = "saqn:op:" + hashfunc(op_tohash, True)
 
-
-    obsproperty = {
-        "name": str(feature),
-        "description": str(feature),
-        "definition": "",
-        "@iot.id": idstr(generatepropertyid)
-        }
-    if upload==True:
-        requests.post(url + '/ObservedProperties', json.dumps(obsproperty))
+    if requests.head(url +  "/ObservedProperties" + "('" + generatepropertyid + "')").status_code == 200:
+        print(generatepropertyid + " exists.")
     else:
-        pass
+        print(generatepropertyid + " does NOT exist. Will generate dummy that needs to be patched. Upload is " + str(upload))
+        obsproperty = {
+            "name": str(feature),
+            "description": str(feature),
+            "definition": "",
+            "@iot.id": generatepropertyid
+            }
+        if upload==True:
+            requests.post(url + '/ObservedProperties', json.dumps(obsproperty))
+        else:
+            pass
 
     #-----------------------------------------------------------------------------
     thingnr=list(file["station_code"]).index(thingcode) #the number of the row in the excel file
@@ -223,17 +251,25 @@ def generatemetadata():
     #building things
 
     #Location ID
-    generatelocid = "geo:" + str(float(file["station_latitude_d"][thingnr])) + "," + str(float(file["station_longitude_d"][thingnr])) + "," + str(float(file["station_altitude"][thingnr]))
+    loc_id_prefix = "geo:" 
+    loc_id_lat = str(float(file["station_latitude_d"][thingnr]))
+    loc_id_lon = str(float(file["station_longitude_d"][thingnr]))
+    loc_id_alt = str(float(file["station_altitude"][thingnr]))
+    
+    loc_tohash = idstr(loc_id_lat + "," + loc_id_lon + "," + loc_id_alt)
+    
+    generatelocid = loc_id_prefix + hashfunc(loc_tohash, True)
 
     #Thing ID
-    generatethingid="saqn:t" #generates the id for the thing by adding each of the following features to define it uniquely
-    generatethingid+=":" + str(repnetcodebyurl(file["network_code"][thingnr])) #adds the url through the network code
-    generatethingid+=":" + "station_" + str(file["station_name"][thingnr])
-    generatethingid+=":" + str(file["station_start_date"][thingnr])[0:4] + "-" + str(file["station_start_date"][thingnr])[4:6]
-    generatethingid+=":" + str(file["station_code"][thingnr])
-#    generatethingid+=":" + str(currentyear) #adds the current year to make the identifier unique in case the id gets changed one day
-#    for label in ["station_name","station_start_date","station_code"]: #add more info if desired
-#        generatethingid+=":" + str(file[label][thingnr])
+    thing_id_prefix = "saqn:t:"
+    thing_id_url = str(repnetcodebyurl(file["network_code"][thingnr]))
+    thing_id_thingname = "station_" + str(file["station_name"][thingnr])
+    thing_id_date = str(file["station_start_date"][thingnr])[0:4] + "-" + str(file["station_start_date"][thingnr])[4:6]
+    thing_id_thingnumber = str(file["station_code"][thingnr])
+    
+    thing_tohash = idstr(thing_id_url + ":" + thing_id_thingname + ":" + thing_id_date + ":" + thing_id_thingnumber)
+    
+    generatethingid = thing_id_prefix + hashfunc(thing_tohash, True)
 
     #generates a dictionary of all raw properties of the thing
     rawproperties = {}
@@ -249,7 +285,7 @@ def generatemetadata():
         "properties": rawproperties,
         "@iot.id": idstr(generatethingid),
          "Locations": [{
-            "name": "Location at latitude " + str(float(file["station_latitude_d"][thingnr])) + " and longitude " + str(float(file["station_longitude_d"][thingnr])),
+            "name": "Location at latitude " + loc_id_lat + " and longitude " + loc_id_lon,
             "description": "located at " + str(file["station_name"][thingnr]),
             "encodingType": "application/vnd.geo+json",
             "@iot.id": idstr(generatelocid),
@@ -281,10 +317,10 @@ def generatemetadata():
                     #------------------------------------------------------------------------------------------------
                     #building the sensors
                     #generates a dictionary of all raw properties of the thing to dump into metadata property
-                    uploadmetadata = {}             
-                    uploadmetadata["script version number"]="00000"
-                    uploadmetadata["uploaded data from"]=configuration["starttime"]
-                    uploadmetadata["uploaded data until"]=configuration["endtime"]
+                    uploadmetadata = {}
+#                    uploadmetadata["script version number"]="1.0"
+#                    uploadmetadata["uploaded data from"]=configuration["starttime"]
+#                    uploadmetadata["uploaded data until"]=configuration["endtime"]
                     
                     rawmetadata = {}
                     rawmetadata["station_code"]=thingcode
@@ -299,17 +335,15 @@ def generatemetadata():
                             rawmetadata[eachdata] = list(df_stationparameters[eachdata][thingcode])[sensnr]
 
 
-                    #Sensor ID - example: saqn:s:lfu.bayern.de:particulate_matter_-_pm10_first_measurement:nephelometry_and_beta_attenuation:2019:deby007
+                    #Sensor ID
+                    sensor_id_prefix = "saqn:s:"
+                    sensor_id_url = str(repnetcodebyurl(file["network_code"][thingnr]))
+                    sensor_id_name = "generic_" + str(list(df_stationparameters["measurement_technique_principle"][thingcode])[sensnr]) + "_sensor"
+                    
+                    sensor_tohash = idstr(sensor_id_url + ":" + sensor_id_name)
+                    
+                    generatesensorid = sensor_id_prefix + hashfunc(sensor_tohash, True)
 
-                    generatesensorid="saqn:s" #generates the id for the sensor by adding each of the following features to define it uniquely
-                    generatesensorid+=":" + str(repnetcodebyurl(file["network_code"][thingnr])) #adds the url through the network code
-                    generatesensorid+=":" + "generic_" + str(list(df_stationparameters["measurement_technique_principle"][thingcode])[sensnr]) + "_sensor"
-
-
-        #                for label in ["parameter","measurement_technique_principle"]: #add more info if desired
-        #                    generatesensorid+=":" + str(list(df_stationparameters[label][thingcode])[sensnr])
-        #                generatesensorid+=":" + str(currentyear) #adds the current year to make the identifier unique in case the id gets changed one day
-        #                generatesensorid+=":" + str(thingcode) #code of the corresponding station
 
                     #generate sensor JSON
                     sensor = {"name": "A " + str(feature) + " sensor",
@@ -326,22 +360,29 @@ def generatemetadata():
                     #------------------------------------------------------------------------------------------------
                     #building the datastreams
 
-                    generatestreamid = "saqn:ds"
-                    generatestreamid+=":" + str(repnetcodebyurl(file["network_code"][thingnr]))
-                    generatestreamid+=":" + "generic_" + str(list(df_stationparameters["measurement_technique_principle"][thingcode])[sensnr]) + "_sensor"
-#                    generatestreamid+=":" + str(list(df_stationparameters["measurement_start_date"][thingcode])[sensnr])[0:4] + "-" + str(list(df_stationparameters["measurement_start_date"][thingcode])[sensnr])[4:6]
-                    generatestreamid+=":" + str(thingcode)
-                    generatestreamid+=":" + str(feature)
-
+                    #Datastream ID
+                    stream_id_prefix = "saqn:ds:"
+                    stream_id_url = str(repnetcodebyurl(file["network_code"][thingnr]))
+                    stream_id_sensorname = "generic_" + str(list(df_stationparameters["measurement_technique_principle"][thingcode])[sensnr]) + "_sensor"
+                    stream_id_sensornumber = ""
+                    
+                    stream_tohash = idstr(stream_id_url + ":" + stream_id_sensorname + ":" + stream_id_sensornumber)
+                    fullstream_tohash = thing_tohash + ":" + stream_tohash + ":" + op_tohash
+                    
+                    generatestreamid = stream_id_prefix + hashfunc(fullstream_tohash, True)
+     
+                    
+                    
+                    
                     print("Building Datastream " + idstr(generatestreamid))
 
                     datastream = {"name": str(thissensor) + " Datastream of station " + str(thingcode),
                                 "description": "A Datastream measuring " + str(thissensor) + " using " + str(mestech),
-                                "observationType": "",
+                                "observationType": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement",
                                 "unitOfMeasurement": {
                                     "name": "microgram per cubic meter",
                                     "symbol": "ug/m^3",
-                                    "definition": "none"
+                                    "definition": "http://www.qudt.org/qudt/owl/1.0.0/unit/Instances.html#KilogramPerCubicMeter"
                                     },
                                 "properties": rawmetadata,
                                 "@iot.id": idstr(generatestreamid),
@@ -432,7 +473,7 @@ def generatemetadata():
                             datalist.append([toutcformat(datetime.utcfromtimestamp(begintimeunix + (scopesec*i))),toutcformat(datetime.utcfromtimestamp(begintimeunix + ((scopesec*i) + (scopesec-60)) )),datavalue[i][0]])
 
                     dataframe = pd.DataFrame.from_records(datalist, columns=labels)
-                    dataframemeta = pd.DataFrame.from_records([[idstr(generatestreamid)]], columns=['datastreamID'])
+                    dataframemeta = pd.DataFrame.from_records([[idstr(generatestreamid)],[fullstream_tohash]], columns=['datastreamID'])
 
                     #save dataframe to excel sheet
                     filename= str(thingcode) + "_" + str(thissensor) + "_" + str(toutcformat(begintime)[0:10]) + "_" + str(toutcformat(endtime)[0:10]) + ".xlsx"
@@ -475,6 +516,13 @@ def generatemetadata():
     except:
         print("Could not retrieve any data for station " + str(thingcode))
     return()
+
+    
+
+
+# # 3. Function parseexcel() parses the Observation File
+
+# In[ ]:
 
 
 #------------------------------------------------------------------------------------
@@ -530,31 +578,28 @@ def parseexcel():
     starttime=time.time()
 
 
-
-#    currentyear=str(datetime.utcnow())[0:4]
-
-
-
     #get datastream id
-    #datastreamID="saqn:d:" + str(repnetcodebyurl(file["network_code"][thingnr])) + ":" + str(list(df_stationparameters["measurement_start_date"][thingcode])[sensnr])[0:6] + ":" + thingcode + ":" + feature.replace(" ", "_")
     datastreamID=datafilemeta["datastreamID"][0]
-
+    fullstream_tohash=datafilemeta["datastreamID"][1]
 
     print("Uploading Observations for Datastream iot.id: " + datastreamID)
 
     #------------------------------------------------------------------------------------
 
-
     for i in range(len(list(datafile["interval_start_time"]))): #eleganter ist hier feature zu nehmen aber ist egal
-        #phenotime = toutcformat(datetime.utcfromtimestamp(tounixtime(begin)+scopesec*i))
 
-        generateobsid="saqn:o:" + str(datastreamID)[8:] + ":" + str(datafile["interval_start_time"][i]) + "/" + str(intervalllength)
+        observation_id_prefix = "saqn:o:"
+        observation_interval = str(datafile["interval_start_time"][i]) + "/" + str(intervalllength)
+
+        observation_tohash = idstr(fullstream_tohash + ":" + observation_interval)
+
+        generateobsid = observation_id_prefix + hashfunc(observation_tohash, False)
 
         observation = {
-        "phenomenonTime" : str(datafile["interval_start_time"][i]) + "/" + str(intervalllength), 
+        "phenomenonTime" : observation_interval, 
         "result" : float(datafile[str(feature)][i]),
         "Datastream":{"@iot.id": str(datastreamID)},
-        "@iot.id": idstr(generateobsid)
+        "@iot.id": generateobsid
         }
 
         requests.post(url + '/Observations', json.dumps(observation))
@@ -562,24 +607,23 @@ def parseexcel():
         #estimating time remaining for parsing
         timeelapsed=time.time()-starttime
         timeelapsedread=readtime(((len(list(datafile["interval_start_time"]))/(i+1))-1)*int(timeelapsed+1))
-        sys.stdout.write('Uploaded ' + str(i) + ' out of ' + str(len(list(datafile["interval_start_time"]))) + ' Observations. Estimating ' + timeelapsedread + ' remaining \r')
+        sys.stdout.write('Uploaded ' + str(i) + ' out of ' + str(len(list(datafile["interval_start_time"]))) + ' Observations. Estimating ' + timeelapsedread + ' remaining \r') 
 
 
     endtime=time.time()
     timeelapsed=endtime-starttime
-
+    
+    sys.stdout.write('\n' + '__________________________________________________________________________' + '\n')
     sys.stdout.write('Finshed! Successfully uploaded ' + str(len(list(datafile["interval_start_time"]))) + ' Observations in ' + str(readtime(int(timeelapsed))) + ' seconds. \r')
-    
-    
-    
-    
 
 
-    
+# # 4. User Input determines which stations to parse
+
+# In[ ]:
 
 
-datafile = pd.read_excel('metadata/Bericht_EU_Meta_Stationen.xlsx')
-listofstations=list(datafile["station_code"])
+#file = pd.read_excel('metadata/Bericht_EU_Meta_Stationen.xlsx')
+listofstations=list(file["station_code"])
 userinput = input("Please enter UBA Station to parse: ")
 
 parselist=[]
@@ -634,6 +678,13 @@ if yesno == 'no':
     sys.exit("Aborting.")
 
 
+
+
+# # 5. Main Parsing Function: Writes config.txt and runs the script generatemetadata() including parseexcel() if upload is set to True
+
+# In[ ]:
+
+
 for station in parselist:
     
     print("__________________________________________________________________________")
@@ -641,7 +692,7 @@ for station in parselist:
     with open('config.txt','w') as configtxt:
         configuration={}
 
-        configuration["url"] = "http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0"
+        configuration["url"] = destinationurl
         configuration["thingcode"] = station
         configuration["feature"] = "PM10"
         configuration["intervalllength"] = "PT1H"
@@ -656,7 +707,7 @@ for station in parselist:
 #    with open('UBA_generate_excel_with_metadata.py') as generatedata:
 #        exec(generatedata.read())
 
-
+sys.stdout.write('\n' + '__________________________________________________________________________' + '\n')
 print("Done")
 
 
@@ -670,16 +721,4 @@ print("Done")
 #requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/FeaturesOfInterest")
 #requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Datastreams")
 #requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Observations")
-
-
-# In[7]:
-
-
-#requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Things('saqn%3At%3Alfu.bayern.de%3Astation_augsburg_karlstrasse%3A2003-08%3Adeby110')")
-
-
-# In[ ]:
-
-
-
 

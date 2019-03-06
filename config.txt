@@ -1,1 +1,1 @@
-{"url": "http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0", "thingcode": "DEBY110", "feature": "PM10", "intervalllength": "PT1H", "runparseaftermodelling": true, "starttime": false, "endtime": "2018-12-31T23:55:00.000Z"}
+{"url": "http://smartaqnet-dev.teco.edu/v1.0", "thingcode": "DEBY007", "feature": "PM10", "intervalllength": "PT1H", "runparseaftermodelling": true, "starttime": false, "endtime": "2018-12-31T23:55:00.000Z"}
