@@ -10,8 +10,10 @@
 import requests, json
 import pandas as pd
 from pandas import ExcelWriter
+from pandas import ExcelFile
 import sys
 import time
+import requests, json
 import numpy as np
 import calendar
 from datetime import datetime
@@ -25,7 +27,7 @@ import hashlib
 # In[ ]:
 
 
-destinationurl = "http://smartaqnet-dev.teco.edu/v1.0"
+destinationurl = "http://smartaqnet.teco.edu/v1.0"
 
 file = pd.read_excel('metadata/Bericht_EU_Meta_Stationen.xlsx')
 filemeta=pd.read_excel('metadata/Bericht_EU_Meta_Stationsparameter.xlsx')
@@ -33,9 +35,9 @@ df_stationparameters = filemeta.set_index("station_code")
 
 #list of features with their component codes as appears in 'metadata/Bericht_EU_Meta_Stationsparameter.xlsx'
 listofreplacements=[
-    ('PM10','5.0','pm10'),
-    ('PM2,5','6001.0','pm2p5'),
-    ('PM1','6002.0','pm1'),
+    ('PM10','5.0','mcpm10'),
+    ('PM2,5','6001.0','mcpm2p5'),
+    ('PM1','6002.0','mcpm1'),
 ]
 
 #federal state, network code (as appears in 'metadata/Bericht_EU_Meta_Stationen.xlsx'), operator-url
@@ -102,6 +104,14 @@ def hashfunc(inputstring, printme):
         print("Converting '" + str(inputstring) + "' to hash '" + str(returnhash) +"'")
     return(returnhash)
 
+
+
+# returns the full 40 digits of the sha1 hash of the input string
+def hashfuncfull(inputstring, printme):
+    returnhash= hashlib.sha1(bytes(str(inputstring), 'utf-8')).hexdigest()
+    if printme == True:
+        print("Converting '" + str(inputstring) + "' to hash '" + str(returnhash) +"'")
+    return(returnhash)
 
 
 #------------------------------------------------------------------------------------
@@ -219,22 +229,24 @@ def generatemetadata():
     
     #observed property --> should already be "officially" created!
     op_tohash = idstr(op_id_variable)
-    generatepropertyid = "saqn:op:" + hashfunc(op_tohash, True)
+#    generatepropertyid = "saqn:op:" + hashfunc(op_tohash, True)
+    generatepropertyid = "saqn:op:" + op_tohash
 
     if requests.head(url +  "/ObservedProperties" + "('" + generatepropertyid + "')").status_code == 200:
         print(generatepropertyid + " exists.")
     else:
-        print(generatepropertyid + " does NOT exist. Will generate dummy that needs to be patched. Upload is " + str(upload))
-        obsproperty = {
-            "name": str(feature),
-            "description": str(feature),
-            "definition": "",
-            "@iot.id": generatepropertyid
-            }
-        if upload==True:
-            requests.post(url + '/ObservedProperties', json.dumps(obsproperty))
-        else:
-            pass
+#        print(generatepropertyid + " does NOT exist. Will generate dummy that needs to be patched. Upload is " + str(upload))
+#        obsproperty = {
+#            "name": str(feature),
+#            "description": str(feature),
+#            "definition": "",
+#            "@iot.id": generatepropertyid
+#            }
+#        if upload==True:
+#            requests.post(url + '/ObservedProperties', json.dumps(obsproperty))
+#        else:
+#            pass
+        sys.exit("Observed Property " + str(feature) + " with id " + generatepropertyid + " does not exist! Abort.")
 
     #-----------------------------------------------------------------------------
     thingnr=list(file["station_code"]).index(thingcode) #the number of the row in the excel file
@@ -258,7 +270,7 @@ def generatemetadata():
     
     loc_tohash = idstr(loc_id_lat + "," + loc_id_lon + "," + loc_id_alt)
     
-    generatelocid = loc_id_prefix + hashfunc(loc_tohash, True)
+    generatelocid = loc_id_prefix + loc_tohash #hashfunc(loc_tohash, True)
 
     #Thing ID
     thing_id_prefix = "saqn:t:"
@@ -278,6 +290,7 @@ def generatemetadata():
             rawproperties[eachproperty]='nan'
         else:
             rawproperties[eachproperty] = file[eachproperty][thingnr]
+    rawproperties["operator_url"] = thing_id_url
 
     #generate the thing JSON
     thingdata = {"name": "Measuring Station " + str(file["station_name"][thingnr]),
@@ -593,7 +606,7 @@ def parseexcel():
 
         observation_tohash = idstr(fullstream_tohash + ":" + observation_interval)
 
-        generateobsid = observation_id_prefix + hashfunc(observation_tohash, False)
+        generateobsid = observation_id_prefix + hashfuncfull(observation_tohash, False)
 
         observation = {
         "phenomenonTime" : observation_interval, 
