@@ -4,7 +4,7 @@
 # # 1. Initialisations
 # ## 1.1. Import Libraries
 
-# In[ ]:
+# In[94]:
 
 
 import requests, json
@@ -20,14 +20,17 @@ from datetime import datetime
 import random
 import glob
 import hashlib
+import easygui
+import os
+import shutil
 
 
 # ## 1.2. Read Metadata Files
 
-# In[ ]:
+# In[95]:
 
 
-destinationurl = "http://smartaqnet.teco.edu/v1.0"
+destinationurl = "http://smartaqnet-dev.teco.edu/v1.0"
 
 file = pd.read_excel('metadata/Bericht_EU_Meta_Stationen.xlsx')
 filemeta=pd.read_excel('metadata/Bericht_EU_Meta_Stationsparameter.xlsx')
@@ -75,7 +78,7 @@ def repnetcodebystate(netcode):
 
 # ## 1.3. General Function Definitions
 
-# In[ ]:
+# In[96]:
 
 
 #converts numpy types to python types, otherwise json conversion produces an error. call json.dumps(***, cls=MyEncoder)
@@ -179,7 +182,7 @@ def addminutesutc(utctime,mins):
 # ## - gets the Observations from UBA url and saves them into an excel file
 # ## - If upload set to true will execute parseexcel() to upload the Observations
 
-# In[ ]:
+# In[97]:
 
 
 
@@ -275,7 +278,7 @@ def generatemetadata():
     #Thing ID
     thing_id_prefix = "saqn:t:"
     thing_id_url = str(repnetcodebyurl(file["network_code"][thingnr]))
-    thing_id_thingname = "station_" + str(file["station_name"][thingnr])
+    thing_id_thingname = "Station " + str(file["station_name"][thingnr])
     thing_id_date = str(file["station_start_date"][thingnr])[0:4] + "-" + str(file["station_start_date"][thingnr])[4:6]
     thing_id_thingnumber = str(file["station_code"][thingnr])
     
@@ -293,7 +296,7 @@ def generatemetadata():
     rawproperties["operator_url"] = thing_id_url
 
     #generate the thing JSON
-    thingdata = {"name": "Measuring Station " + str(file["station_name"][thingnr]),
+    thingdata = {"name": thing_id_thingname,
         "description": "A station measuring" + str(generatedescr),
         "properties": rawproperties,
         "@iot.id": idstr(generatethingid),
@@ -329,29 +332,12 @@ def generatemetadata():
 
                     #------------------------------------------------------------------------------------------------
                     #building the sensors
-                    #generates a dictionary of all raw properties of the thing to dump into metadata property
-                    uploadmetadata = {}
-#                    uploadmetadata["script version number"]="1.0"
-#                    uploadmetadata["uploaded data from"]=configuration["starttime"]
-#                    uploadmetadata["uploaded data until"]=configuration["endtime"]
-                    
-                    rawmetadata = {}
-                    rawmetadata["station_code"]=thingcode
-                    rawmetadata["upload properties"]=uploadmetadata
-                    
-                    
-                    for eachdata in list(df_stationparameters): #option 1: all metadata
-                    #for eachdata in ["type_of_parameter","parameter","component_code","measurement_technique_principle"]: #option 2: pick
-                        if str(list(df_stationparameters[eachdata][thingcode])[sensnr]) == 'nan':
-                            rawmetadata[eachdata]='nan'
-                        else:
-                            rawmetadata[eachdata] = list(df_stationparameters[eachdata][thingcode])[sensnr]
 
 
                     #Sensor ID
                     sensor_id_prefix = "saqn:s:"
                     sensor_id_url = str(repnetcodebyurl(file["network_code"][thingnr]))
-                    sensor_id_name = "generic_" + str(list(df_stationparameters["measurement_technique_principle"][thingcode])[sensnr]) + "_sensor"
+                    sensor_id_name = "generic " + str(list(df_stationparameters["measurement_technique_principle"][thingcode])[sensnr]) + " sensor"
                     
                     sensor_tohash = idstr(sensor_id_url + ":" + sensor_id_name)
                     
@@ -359,9 +345,10 @@ def generatemetadata():
 
 
                     #generate sensor JSON
-                    sensor = {"name": "A " + str(feature) + " sensor",
+                    sensor = {"name": sensor_id_name,
                             "description": "A sensor measuring " + str(feature) + " using " + str(mestech),
-                            "encodingType": "application/json",
+                            "properties": {"operator_url": sensor_id_url},
+                            "encodingType": "",
                             "metadata": "",
                             "@iot.id": idstr(generatesensorid)
                             }
@@ -372,11 +359,11 @@ def generatemetadata():
 
                     #------------------------------------------------------------------------------------------------
                     #building the datastreams
-
+                    
                     #Datastream ID
                     stream_id_prefix = "saqn:ds:"
                     stream_id_url = str(repnetcodebyurl(file["network_code"][thingnr]))
-                    stream_id_sensorname = "generic_" + str(list(df_stationparameters["measurement_technique_principle"][thingcode])[sensnr]) + "_sensor"
+                    stream_id_sensorname = sensor_id_name
                     stream_id_sensornumber = ""
                     
                     stream_tohash = idstr(stream_id_url + ":" + stream_id_sensorname + ":" + stream_id_sensornumber)
@@ -384,7 +371,29 @@ def generatemetadata():
                     
                     generatestreamid = stream_id_prefix + hashfunc(fullstream_tohash, True)
      
+                    #generates a dictionary of all raw properties of the thing to dump into metadata property
+                    uploadmetadata = {}
+#                    uploadmetadata["script version number"]="1.0"
+#                    uploadmetadata["uploaded data from"]=configuration["starttime"]
+#                    uploadmetadata["uploaded data until"]=configuration["endtime"]
                     
+                    rawmetadata = {}
+#                    rawmetadata["station_code"]=thingcode
+                    rawmetadata["operator_url"]=stream_id_url
+                    rawmetadata["upload properties"]=uploadmetadata
+                    
+                    
+                    for eachdata in list(df_stationparameters): #option 1: all metadata
+                    #for eachdata in ["type_of_parameter","parameter","component_code","measurement_technique_principle"]: #option 2: pick
+                        if str(list(df_stationparameters[eachdata][thingcode])[sensnr]) == 'nan':
+                            rawmetadata[eachdata]='nan'
+                        else:
+                            rawmetadata[eachdata] = list(df_stationparameters[eachdata][thingcode])[sensnr]
+
+                    
+                    
+                    
+                   
                     
                     
                     print("Building Datastream " + idstr(generatestreamid))
@@ -488,6 +497,20 @@ def generatemetadata():
                     dataframe = pd.DataFrame.from_records(datalist, columns=labels)
                     dataframemeta = pd.DataFrame.from_records([[idstr(generatestreamid)],[fullstream_tohash]], columns=['datastreamID'])
 
+                    
+                    #if already a file exists for that datastream and feature move it into archive before creating new
+                    try: #get the first file matching thingcode and feature e.g. DEBY007_PM10_*.xlsx
+                        data_dir=str(os.getcwd()) + "/data/"
+                                                
+                        existing_file = glob.glob(data_dir + str(thingcode) + "*" + str(feature) + "*.xlsx")[0]
+                        print("File for that datastream and observedProperty already exists. ")
+                        existing_file_new = str(existing_file)[:-5] + "---" + str(toutcformat(datetime.utcnow()))[:-5].replace(":","-") + ".xlsx"
+                        print("Renaming file " + existing_file + " to " + existing_file_new)
+                        os.rename(existing_file, data_dir +'/archive/' + str(existing_file_new)[len(data_dir):])
+                        print("Moving file into archive folder")
+                    except:
+                        pass
+                    
                     #save dataframe to excel sheet
                     filename= str(thingcode) + "_" + str(thissensor) + "_" + str(toutcformat(begintime)[0:10]) + "_" + str(toutcformat(endtime)[0:10]) + ".xlsx"
                     writer = ExcelWriter('data/' +  str(filename))
@@ -535,7 +558,7 @@ def generatemetadata():
 
 # # 3. Function parseexcel() parses the Observation File
 
-# In[ ]:
+# In[98]:
 
 
 #------------------------------------------------------------------------------------
@@ -567,10 +590,20 @@ def parseexcel():
                 return(rep[1])
 
 
+     
+
+
+     
+            
+            
     try: #get the first file matching thingcode and feature e.g. DEBY007_PM10_*.xlsx
         filename = glob.glob("data/" + str(thingcode) + "*" + str(feature) + "*.xlsx")[0]
     except:
-        return()
+        print("No file to parse found that matches the requirements")
+        pass
+    
+#    filename_path = easygui.fileopenbox(msg=None, title=None, default='Data/' + str(thingcode) + '*' + str(feature) + '*.xlsx', filetypes=None, multiple=False)
+#    filename= filename_path.split("\\")[-1]
     
     print("Loading file " + str(filename) + "...")
     datafile=pd.read_excel(str(filename),0)
@@ -632,7 +665,7 @@ def parseexcel():
 
 # # 4. User Input determines which stations to parse
 
-# In[ ]:
+# In[99]:
 
 
 #file = pd.read_excel('metadata/Bericht_EU_Meta_Stationen.xlsx')
@@ -675,7 +708,7 @@ else:
     endtime = False
     endtimestring = "now"
 
-uploadyesno = input("Upload data to server after parsing (yes/no): ")
+uploadyesno = input("Upload data to server after writing to file (yes/no): ")
 if uploadyesno == "yes":
     upload=True
     uploadstring = "Data will be uploaded"
@@ -695,7 +728,7 @@ if yesno == 'no':
 
 # # 5. Main Parsing Function: Writes config.txt and runs the script generatemetadata() including parseexcel() if upload is set to True
 
-# In[ ]:
+# In[100]:
 
 
 for station in parselist:
@@ -724,7 +757,7 @@ sys.stdout.write('\n' + '_______________________________________________________
 print("Done")
 
 
-# In[2]:
+# In[101]:
 
 
 #requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Things")
