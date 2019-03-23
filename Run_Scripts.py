@@ -1,10 +1,10 @@
-#!/usr/bin/env python
+
 # coding: utf-8
 
 # # 1. Initialisations
 # ## 1.1. Import Libraries
 
-# In[94]:
+# In[2]:
 
 
 import requests, json
@@ -20,14 +20,14 @@ from datetime import datetime
 import random
 import glob
 import hashlib
-import easygui
+#import easygui
 import os
 import shutil
 
 
 # ## 1.2. Read Metadata Files
 
-# In[95]:
+# In[3]:
 
 
 destinationurl = "http://smartaqnet-dev.teco.edu/v1.0"
@@ -78,7 +78,7 @@ def repnetcodebystate(netcode):
 
 # ## 1.3. General Function Definitions
 
-# In[96]:
+# In[4]:
 
 
 #converts numpy types to python types, otherwise json conversion produces an error. call json.dumps(***, cls=MyEncoder)
@@ -182,7 +182,7 @@ def addminutesutc(utctime,mins):
 # ## - gets the Observations from UBA url and saves them into an excel file
 # ## - If upload set to true will execute parseexcel() to upload the Observations
 
-# In[97]:
+# In[5]:
 
 
 
@@ -558,7 +558,7 @@ def generatemetadata():
 
 # # 3. Function parseexcel() parses the Observation File
 
-# In[98]:
+# In[6]:
 
 
 #------------------------------------------------------------------------------------
@@ -665,7 +665,7 @@ def parseexcel():
 
 # # 4. User Input determines which stations to parse
 
-# In[99]:
+# In[ ]:
 
 
 #file = pd.read_excel('metadata/Bericht_EU_Meta_Stationen.xlsx')
@@ -673,9 +673,22 @@ listofstations=list(file["station_code"])
 userinput = input("Please enter UBA Station to parse: ")
 
 parselist=[]
-for station in listofstations:
-    if userinput in station:
-        parselist.append(station)
+#for station in listofstations:
+#    if userinput in station:
+#        parselist.append(station)
+                         
+if isinstance(userinput,list) is True: #if the user gives an array of station codes, take that
+    parselist=userinput
+else: 
+    for nr in range(len(file)): #else perform a substring search in all informations on the stations
+        the_dict=file.iloc[[str(nr)]].to_dict(orient="index")[nr]
+        for key in the_dict:
+            if userinput in str(the_dict[key]):
+                parselist.append(the_dict["station_code"])
+
+print("Will parse the following stations: ")
+print(parselist)
+
 
 print("If you do not input a start time, the earliest date a measurement appears will be taken. ")
 starttimeyesno = input("Input start time (yes/no) : ")
@@ -726,9 +739,10 @@ if yesno == 'no':
 
 
 
+
 # # 5. Main Parsing Function: Writes config.txt and runs the script generatemetadata() including parseexcel() if upload is set to True
 
-# In[100]:
+# In[ ]:
 
 
 for station in parselist:
@@ -757,7 +771,7 @@ sys.stdout.write('\n' + '_______________________________________________________
 print("Done")
 
 
-# In[101]:
+# In[ ]:
 
 
 #requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Things")
