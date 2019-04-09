@@ -1,10 +1,10 @@
-
+#!/usr/bin/env python
 # coding: utf-8
 
 # # 1. Initialisations
 # ## 1.1. Import Libraries
 
-# In[2]:
+# In[8]:
 
 
 import requests, json
@@ -27,10 +27,11 @@ import shutil
 
 # ## 1.2. Read Metadata Files
 
-# In[3]:
+# In[9]:
 
 
-destinationurl = "http://smartaqnet-dev.teco.edu/v1.0"
+# destinationurl = "http://smartaqnet-dev.teco.edu/v1.0"
+destinationurl = "http://api.smartaq.net/v1.0"
 
 file = pd.read_excel('metadata/Bericht_EU_Meta_Stationen.xlsx')
 filemeta=pd.read_excel('metadata/Bericht_EU_Meta_Stationsparameter.xlsx')
@@ -78,7 +79,7 @@ def repnetcodebystate(netcode):
 
 # ## 1.3. General Function Definitions
 
-# In[4]:
+# In[10]:
 
 
 #converts numpy types to python types, otherwise json conversion produces an error. call json.dumps(***, cls=MyEncoder)
@@ -182,7 +183,7 @@ def addminutesutc(utctime,mins):
 # ## - gets the Observations from UBA url and saves them into an excel file
 # ## - If upload set to true will execute parseexcel() to upload the Observations
 
-# In[5]:
+# In[11]:
 
 
 
@@ -381,7 +382,12 @@ def generatemetadata():
 #                    rawmetadata["station_code"]=thingcode
                     rawmetadata["operator_url"]=stream_id_url
                     rawmetadata["upload properties"]=uploadmetadata
+        
+                    license = {}
+                    license["type"] = ""
+                    license["owner"] = "Umweltbundesamt"
                     
+                    rawmetadata["license"]=license
                     
                     for eachdata in list(df_stationparameters): #option 1: all metadata
                     #for eachdata in ["type_of_parameter","parameter","component_code","measurement_technique_principle"]: #option 2: pick
@@ -414,7 +420,7 @@ def generatemetadata():
                                 }
 
                     if upload==True:
-                        requests.post(url + '/Datastreams', json.dumps(datastream))
+                        requests.post(url + "/Things('" + idstr(generatethingid) + "')/Datastreams", json.dumps(datastream))
                     else:
                         pass
 
@@ -558,7 +564,7 @@ def generatemetadata():
 
 # # 3. Function parseexcel() parses the Observation File
 
-# In[6]:
+# In[12]:
 
 
 #------------------------------------------------------------------------------------
@@ -648,7 +654,7 @@ def parseexcel():
         "@iot.id": generateobsid
         }
 
-        requests.post(url + '/Observations', json.dumps(observation))
+        requests.post(url + "/Datastreams('" + datastreamID + "')/Observations", json.dumps(observation))
 
         #estimating time remaining for parsing
         timeelapsed=time.time()-starttime
@@ -665,7 +671,7 @@ def parseexcel():
 
 # # 4. User Input determines which stations to parse
 
-# In[ ]:
+# In[16]:
 
 
 #file = pd.read_excel('metadata/Bericht_EU_Meta_Stationen.xlsx')
@@ -739,10 +745,9 @@ if yesno == 'no':
 
 
 
-
 # # 5. Main Parsing Function: Writes config.txt and runs the script generatemetadata() including parseexcel() if upload is set to True
 
-# In[ ]:
+# In[17]:
 
 
 for station in parselist:
@@ -771,14 +776,24 @@ sys.stdout.write('\n' + '_______________________________________________________
 print("Done")
 
 
-# In[ ]:
+# In[7]:
 
 
-#requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Things")
+# requests.delete("http://smartaqnet-dev.teco.edu/v1.0/Things('d42cbb8')")
+# requests.delete("http://smartaqnet-dev.teco.edu/v1.0/Things('12b713d')")
+# requests.delete("http://smartaqnet-dev.teco.edu/v1.0/Things('504a3c6')")
+# requests.delete("http://smartaqnet-dev.teco.edu/v1.0/Things('b666034')")
+# requests.delete("http://smartaqnet-dev.teco.edu/v1.0/Things('4049564')")
 #requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Sensors")
 #requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Locations")
 #requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/ObservedProperties")
 #requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/FeaturesOfInterest")
 #requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Datastreams")
 #requests.delete("http://smartaqnet-dev.teco.edu:8080/FROST-Server/v1.0/Observations")
+
+
+# In[ ]:
+
+
+
 
