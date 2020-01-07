@@ -1,172 +1,79 @@
-#!/usr/bin/env python
-from datetime import datetime, timezone
+﻿#!/usr/bin/env python
+# coding: utf-8
+
+import requests, json
+from datetime import datetime
+import pandas as pd
 import hashlib
-import logging as log
-import requests
-import isodate
-
-log.basicConfig(level=log.INFO)
-
-ST_URL = "http://smartaqnet-dev.dmz.teco.edu/v1.0"  # saqn frost server
-UBA_URL = 'https://www.umweltbundesamt.de/js/uaq/data/stations'
-
-SCOPE = '1SMW'  # umweltbundesamt website code: 1 hour means
-SCOPE_SEC = 60 * 60  # scope in seconds
-
-FEATURE = 'PM10'  # umweltbundesamt observedProperty code
-OBSPROPERTY_CODE = "mcpm10"  # frost server observedProperty code
 
 
+# function that takes two lists of same length and makes a dict of them, identifying element i with element i
+def stitch_to_dict(a,b):
+    r={}
+    for i in range(len(a)):
+        r[a[i]]=b[i]
+    return r
+
+# everything lowercase, replaces slashes and spaces with underscores, ...
 def idstr(idinput):
     """returns strings in the conventional format for iot.ids"""
     return (str(idinput).lower().replace(" ", "_").replace("/", "_").replace(
         "ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss"))
 
-
+# returns the first 7 digits of the sha1 hash of the input string
 def hashfunc(inputstring):
-    """returns the first 7 digits of the sha1 hash of the input string"""
-    returnhash = hashlib.sha1(bytes(str(inputstring),
-                                    'utf-8')).hexdigest()[0:7]
-    log.debug("Converting '" + str(inputstring) + "' to hash '" +
-              str(returnhash) + "'")
-    return returnhash
+    return hashlib.sha1(bytes(str(inputstring), 'utf-8')).hexdigest()[0:7]
 
-
+# returns the full 40 digits of the sha1 hash of the input string
 def hashfuncfull(inputstring):
-    """returns the full 40 digits of the sha1 hash of the input string"""
-    returnhash = hashlib.sha1(bytes(str(inputstring), 'utf-8')).hexdigest()
-    log.debug("Converting '" + str(inputstring) + "' to hash '" +
-              str(returnhash) + "'")
-    return returnhash
+    return hashlib.sha1(bytes(str(inputstring), 'utf-8')).hexdigest()
+
+# UBA has phenomenonTimes end with hour 24 instead of 0 the next day. datetime cant deal with that, have to replace
+def todatetimeUTCstring(string):
+    if(string[-8:-6] == '24'):
+        res=pd.to_datetime(string.replace(" 24:"," 23:"))+pd.Timedelta('1 hour')
+    else: 
+        res=pd.to_datetime(string)
+    return (res - pd.Timedelta('1 hour')).strftime("%Y-%m-%d" + "T" + "%H" + ":00:00.000Z")
 
 
-def get(*r):
-    """Sensorthing request"""
-    paginate = len([x for x in r if x.startswith("$top")]) > 0
-    url = ST_URL + "/" + r[0] + "?" + "&".join(r[1:]) if len(r) > 1 else ""
-    json = {"value": []}
-    while True:
-        response = requests.get(url)
-        response.raise_for_status()
-        value = json["value"]
-        json = response.json()
-        json["value"] += value
-        if paginate and "@iot.nextLink" in response.json():
-            url = response.json()["@iot.nextLink"]
-        else:
-            break
-    return json
 
 
-def getuba(feature, scope, station, begintime, endtime):
-    """Umweltbundesamt request"""
-    getdatafrom = UBA_URL + '/measuring?' + "&".join([
-        'pollutant[]=' + feature, 'scope[]=' + scope, 'station[]=' + station,
-        'group[]=pollutant', 'range[]=' + str(begintime) + ',' + str(endtime)
-    ])
-    response = requests.get(getdatafrom)
-    response.raise_for_status()
-    return response.json()
 
+url = "https://api.smartaq.net/v1.0"
 
-# - get all existing UBA stations from frost server
-# - get the latest observation date
-# - get the next observation from UBA server
-# - post to frost
+uba_stations = json.loads(requests.get(url + "/Things?$filter=properties/operator.domain%20eq%20%27umweltbundesamt.de%27&$expand=datastreams($expand=sensor,observedProperty)").text)["value"]
 
-# all things von lfu.bayern.de
+current_component = "1" #PM10
+current_scope = "2" #hourly averages
 
+for thing in uba_stations:
+    station_no = thing["properties"]["station_no"]
+    current_thing_idparts = thing["properties"]["operator.domain"] + ":" + thing["properties"]["shortname"] + ":" + thing["properties"]["hardware.id"]
+    
+    for stream in thing["Datastreams"]:
+        current_sensor_idparts = stream["Sensor"]["properties"]["manufacturer.domain"] + ":" + stream["Sensor"]["properties"]["shortname"]
+        current_datastream_idparts = current_thing_idparts + ":" + current_sensor_idparts + ":" + stream["properties"]["hardware.serial_number"] + ":" + stream["ObservedProperty"]["properties"]["shortname"]
+        
+        timestamp_from = stream["phenomenonTime"].split("/")[1]
+        
+        start_date=timestamp_from.split("T")[0]
+        start_result_time=str(int(timestamp_from.split("T")[1].split(":")[0]) + 1)
+        end_date=datetime.strftime(datetime.now(),"%Y-%m-%d")
+        end_result_time=datetime.strftime(datetime.now(),"%H")
 
-class LatestObservations:  # pylint: disable=too-few-public-methods
-    """iterate the latest observation"""
+        data=json.loads(requests.get("https://www.umweltbundesamt.de/api/air_data/v2/measures/json?date_from=" + start_date + "&time_from=" + start_result_time + "&date_to=" + end_date + "&time_to=" + end_result_time + "&station=" + str(station_no) + "&component=" + current_component + "&scope=" + current_scope).text)
 
-    def __init__(self, iot_id):
-        self.iot_id = iot_id
-        self.last = None
+        val_index=data["indices"]["data"]["station id"]["date start"].index("value")
+        end_index=data["indices"]["data"]["station id"]["date start"].index("date end")
 
-    def __iter__(self):
-        return self
+        #function todatetimeUTCstring converts to pandas datetime, converts CET to UTC, then outputs ISO string
+        list_of_results=list(map(lambda x: {"result":data['data'][str(station_no)][x][val_index],"resultTime":todatetimeUTCstring(data['data'][str(station_no)][x][end_index]) ,"phenomenonTime": todatetimeUTCstring(x) + "/" + todatetimeUTCstring(data['data'][str(station_no)][x][end_index])},data['data'][str(station_no)].keys()))
+        
+        totalobs = len(list_of_results)
 
-    def __next__(self):
-        latest_pheno_time = get(
-            "Datastreams('" + datastream["@iot.id"] + "')/Observations",
-            "$orderby=phenomenontime%20desc&$top=1"
-        )["value"][0]["phenomenonTime"]
-        end_latest_pheno_datetime = isodate.parse_datetime(
-            latest_pheno_time.split('/')[-1])
-        if (datetime.now(timezone.utc) -
-                end_latest_pheno_datetime).total_seconds() < SCOPE_SEC + 10:
-            raise StopIteration()
-        self.last = end_latest_pheno_datetime
-        return self.last
+        for thisresult in list_of_results:
+            thisobs = thisresult
+            thisobs["@iot.id"] = "saqn:o:" + hashfuncfull(current_datastream_idparts + ":" + idstr(thisresult["phenomenonTime"]))
+            p = requests.post(url + "/Datastreams('" + stream["@iot.id"]  + "')/Observations",json.dumps(thisobs))        
 
-
-# for each thing...
-for thing in get(
-        "Things",
-        "$filter=properties/operator_url eq 'lfu.bayern.de'")["value"]:
-    log.info(thing["name"])
-
-    # ...identify the datastream iot.id corresponding to the observedproperty
-    try:
-        datastream = get(
-            "Things('" + thing["@iot.id"] + "')/Datastreams",
-            "$filter=ObservedProperty/@iot.id eq 'saqn:op:" +
-            OBSPROPERTY_CODE + "'")["value"][0]
-    except IndexError:
-        log.warning("no datastream existing for thing " + thing["name"] +
-                    " with observedProperty " + OBSPROPERTY_CODE)
-        continue
-
-    for current in LatestObservations(datastream["@iot.id"]):
-        begintimeunix = current.timestamp()
-        endtimeunix = begintimeunix + SCOPE_SEC
-
-        # get data from uba
-        datavalue = getuba(FEATURE, SCOPE, thing["properties"]["station_code"],
-                           begintimeunix - 10,
-                           endtimeunix + 10)["data"][0][0][0]
-
-        # get the unhashed datastream id
-        # thing id
-        thing_id_url = thing["properties"]["operator_url"]
-        thing_id_thingname = str(thing["name"])
-        thing_id_date = str(
-            thing["properties"]["station_start_date"])[0:4] + "-" + str(
-                thing["properties"]["station_start_date"])[4:6]
-        thing_id_thingnumber = str(thing["properties"]["station_code"])
-        thing_tohash = idstr(thing_id_url + ":" + thing_id_thingname + ":" +
-                             thing_id_date + ":" + thing_id_thingnumber)
-
-        # Datastream ID
-        stream_id_url = datastream["properties"]["operator_url"]
-        stream_id_sensorname = datastream["properties"]["sensor_name"]
-        stream_id_sensornumber = datastream["properties"][
-            "sensor_serial_number"]
-        stream_tohash = idstr(stream_id_url + ":" + stream_id_sensorname +
-                              ":" + stream_id_sensornumber)
-
-        fullstream_tohash = (thing_tohash + ":" + stream_tohash + ":" +
-                             OBSPROPERTY_CODE)
-
-        # generate observation and push to frost
-        observation_id_prefix = "saqn:o:"
-        observation_interval = current.isoformat() + "/" + "PT1H"
-        observation_tohash = idstr(fullstream_tohash + ":" +
-                                   observation_interval)
-        generateobsid = observation_id_prefix + hashfuncfull(
-            observation_tohash)
-
-        observation = {
-            "phenomenonTime": observation_interval,
-            "result": datavalue,
-            "Datastream": {
-                "@iot.id": datastream["@iot.id"]
-            },
-            "@iot.id": generateobsid
-        }
-        requests.post(ST_URL + "/Datastreams('" + datastream["@iot.id"] +
-                      "')/Observations",
-                      json=observation).raise_for_status()
-        log.info("Successfully posted an Observation for " +
-                 str(observation_interval))

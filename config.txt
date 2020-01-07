@@ -1,1 +1,0 @@
-{"url": "http://api.smartaq.net/v1.0", "thingcode": "DEBY150", "feature": "PM10", "intervalllength": "PT1H", "runparseaftermodelling": true, "starttime": "2019-05-01T01:00:00.000Z", "endtime": false}
